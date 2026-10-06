@@ -1,0 +1,8 @@
+# Built binaries
+/multi-ping
+/multi-ping.exe
+/dist/
+
+# Dumps saved with the w key, and logs
+multi-ping-*.jsonl
+*.csv
