@@ -149,3 +149,7 @@ docs/screenshot.py docs/interfaces.png 100x16 9 '\t ' -- -n 500 -t 400 -i docker
 | Linux | unprivileged ICMP socket + `SO_BINDTODEVICE` (needs `net.ipv4.ping_group_range` to include your group, the default on current distributions) |
 | macOS | unprivileged ICMP socket + `IP_BOUND_IF` / `IPV6_BOUND_IF` |
 | Windows | `IcmpSendEcho2Ex` / `Icmp6SendEcho2` with the interface's address as source |
+
+## License
+
+[MIT](LICENSE)
