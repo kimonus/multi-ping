@@ -5,6 +5,7 @@ shows them side by side in the terminal, so you can see whether one interface
 adds delay or loses packets.
 
 Runs on Linux, macOS and Windows without root or administrator rights.
+The Windows build compiles but has not been run yet; reports are welcome.
 
 ![Two panels pinging side by side](docs/main.png)
 
