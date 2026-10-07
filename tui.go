@@ -170,6 +170,13 @@ func (s *series) window(now time.Time, d time.Duration) windowStats {
 // graphBars are the heights a delay can be drawn at, lowest first.
 var graphBars = []rune("▁▂▃▄▅▆▇█")
 
+// graphOver marks a reply too slow for the graph's scale.
+const graphOver = '▲'
+
+// graphHeadroom is how far above the 95th percentile of its replies the
+// graph's scale may reach.
+const graphHeadroom = 2
+
 // panel is one interface's column.
 type panel struct {
 	series        // probes to the destination
@@ -698,10 +705,10 @@ func (m *model) View() string {
 	}
 	widths[n-1] = m.w - (m.w/n)*(n-1)
 
-	graph, scale := m.viewGraph(m.w)
+	graph, scale, over := m.viewGraph(m.w)
 	// The graph gives way to the panels when the terminal is too short for both.
 	if bodyH-len(graph) < minBodyH {
-		graph, scale = nil, 0
+		graph, scale, over = nil, 0, false
 	}
 	bodyH -= len(graph)
 	cols := make([]string, n)
@@ -709,7 +716,7 @@ func (m *model) View() string {
 		cols[i] = m.viewPanel(i, widths[i], bodyH)
 	}
 	parts := append([]string{top, lipgloss.JoinHorizontal(lipgloss.Top, cols...)}, graph...)
-	parts = append(parts, clip(m.viewCompare(scale), m.w), clip(m.viewStatus(), m.w), bottom)
+	parts = append(parts, clip(m.viewCompare(scale, over), m.w), clip(m.viewStatus(), m.w), bottom)
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
@@ -717,8 +724,8 @@ func (m *model) View() string {
 // line per panel and one cell per round. A round sits in the same column on
 // every line and all lines share one scale, so delay and loss on different
 // interfaces can be compared directly. It also returns the delay that is drawn
-// at full height.
-func (m *model) viewGraph(w int) ([]string, time.Duration) {
+// at full height, and whether any reply was slower than that.
+func (m *model) viewGraph(w int) ([]string, time.Duration, bool) {
 	labelW, last := 0, 0
 	for _, p := range m.panels {
 		labelW = max(labelW, lipgloss.Width(m.panelName(p)))
@@ -732,13 +739,26 @@ func (m *model) viewGraph(w int) ([]string, time.Duration) {
 	first := max(last-cells+1, 1)
 
 	visible := make([][]row, len(m.panels))
-	var scale time.Duration
+	var rtts []time.Duration
 	for i, p := range m.panels {
 		at, _ := slices.BinarySearchFunc(p.rows, first, func(r row, seq int) int { return r.seq - seq })
 		rows := p.rows[at:]
 		visible[i] = rows
 		for _, r := range rows {
-			scale = max(scale, r.rtt)
+			if r.state == rowOK {
+				rtts = append(rtts, r.rtt)
+			}
+		}
+	}
+	// The slowest reply sets the scale, unless it is far above the rest: a
+	// few stray replies must not flatten every other bar.
+	var scale time.Duration
+	over := false
+	if n := len(rtts); n > 0 {
+		slices.Sort(rtts)
+		scale = rtts[n-1]
+		if limit := rtts[(n*95+99)/100-1] * graphHeadroom; scale > limit {
+			scale, over = limit, true
 		}
 	}
 
@@ -770,11 +790,14 @@ func (m *model) viewGraph(w int) ([]string, time.Duration) {
 			case rowPending:
 				run, runStyle = append(run, '·'), styleDim
 			case rowOK:
-				level := 0
-				if scale > 0 {
-					level = min(int(r.rtt*time.Duration(len(graphBars))/scale), len(graphBars)-1)
+				bar := graphOver
+				if r.rtt <= scale {
+					bar = graphBars[0]
+					if scale > 0 {
+						bar = graphBars[min(int(r.rtt*time.Duration(len(graphBars))/scale), len(graphBars)-1)]
+					}
 				}
-				run, runStyle = append(run, graphBars[level]), color
+				run, runStyle = append(run, bar), color
 			default:
 				run, runStyle = append(run, '×'), styleBad
 			}
@@ -782,7 +805,7 @@ func (m *model) viewGraph(w int) ([]string, time.Duration) {
 		flush()
 		lines[i] = clip(b.String(), w)
 	}
-	return lines, scale
+	return lines, scale, over
 }
 
 // wrap joins items with sep, breaking into lines no wider than w.
@@ -843,7 +866,7 @@ func (m *model) viewStatus() string {
 }
 
 // viewCompare shows how every other panel differs from the first one.
-func (m *model) viewCompare(scale time.Duration) string {
+func (m *model) viewCompare(scale time.Duration, over bool) string {
 	ref := m.panels[0]
 	parts := []string{"Δ vs " + m.panelName(ref)}
 	signed := func(v float64, text string) string {
@@ -866,7 +889,11 @@ func (m *model) viewCompare(scale time.Duration) string {
 		parts = append(parts, fmt.Sprintf("%s: %s, %s", m.panelName(p), avg, loss))
 	}
 	if scale > 0 {
-		parts = append(parts, styleDim.Render("graph 0–"+fmtMS(scale)+" ms"))
+		legend := "graph 0–" + fmtMS(scale) + " ms"
+		if over {
+			legend += ", " + string(graphOver) + " above"
+		}
+		parts = append(parts, styleDim.Render(legend))
 	}
 	return strings.Join(parts, styleDim.Render(" │ "))
 }

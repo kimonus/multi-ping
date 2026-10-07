@@ -113,6 +113,9 @@ wlan0 ▃▃▄×▃▅▅×▄▅▅▆×▇██▆▅▅·
   (just added, or reset) leaves the cell empty.
 - All lines share one scale, from zero to the slowest reply on screen; the
   line below names it.
+- A few stray replies do not flatten the rest: the scale stops at twice the
+  95th percentile of the replies on screen, and a reply slower than that is
+  drawn as `▲`. The line below then reads `graph 0–40.0 ms, ▲ above`.
 - The graph is left out when the terminal is too short to show it together
   with the panels.
 
