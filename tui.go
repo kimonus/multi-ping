@@ -33,6 +33,9 @@ var maxRows = 100_000
 
 const maxPanels = 6
 
+// minBodyH is the least height of the panels: border, title and statistics.
+const minBodyH = 7
+
 // recentWindow is the span of the "last 60s" figures.
 const recentWindow = 60 * time.Second
 
@@ -50,6 +53,10 @@ var (
 	borderPlain = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("8"))
 	borderFocus = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("14"))
 )
+
+// panelColors tell the panels apart: each one's title and its line in the
+// graph share a colour. Red and grey are left out, they mean lost and idle.
+var panelColors = [maxPanels]lipgloss.Color{"14", "11", "13", "10", "12", "15"}
 
 type rowState int
 
@@ -160,36 +167,8 @@ func (s *series) window(now time.Time, d time.Duration) windowStats {
 	return w
 }
 
-// recent returns up to n of the latest answered or lost probes, newest first.
-func (s *series) recent(n int) []row {
-	var done []row
-	for i := len(s.rows) - 1; i >= 0 && len(done) < n; i-- {
-		if s.rows[i].state != rowPending {
-			done = append(done, s.rows[i])
-		}
-	}
-	return done
-}
-
-// sparkline draws the recent probes, one cell each, with top as full height.
-func (s *series) sparkline(width int, top time.Duration) string {
-	done := s.recent(width)
-	bars := []rune("▁▂▃▄▅▆▇█")
-	var b strings.Builder
-	for i := len(done) - 1; i >= 0; i-- {
-		r := done[i]
-		if r.state != rowOK {
-			b.WriteString(styleBad.Render("×"))
-			continue
-		}
-		level := 0
-		if top > 0 {
-			level = min(int(r.rtt*time.Duration(len(bars))/top), len(bars)-1)
-		}
-		b.WriteRune(bars[level])
-	}
-	return b.String()
-}
+// graphBars are the heights a delay can be drawn at, lowest first.
+var graphBars = []rune("▁▂▃▄▅▆▇█")
 
 // panel is one interface's column.
 type panel struct {
@@ -711,7 +690,7 @@ func (m *model) View() string {
 		help = []string{"type this panel's destination", "Enter confirm (empty = shared)", "Esc cancel"}
 	}
 	bottom := styleDim.Render(wrap(help, " · ", m.w))
-	bodyH := max(m.h-lipgloss.Height(top)-lipgloss.Height(bottom)-2, 8)
+	bodyH := max(m.h-lipgloss.Height(top)-lipgloss.Height(bottom)-2, minBodyH)
 	n := len(m.panels)
 	widths := make([]int, n)
 	for i := range widths {
@@ -719,23 +698,91 @@ func (m *model) View() string {
 	}
 	widths[n-1] = m.w - (m.w/n)*(n-1)
 
-	// One scale for every sparkline, so their heights are comparable.
+	graph, scale := m.viewGraph(m.w)
+	// The graph gives way to the panels when the terminal is too short for both.
+	if bodyH-len(graph) < minBodyH {
+		graph, scale = nil, 0
+	}
+	bodyH -= len(graph)
+	cols := make([]string, n)
+	for i := range m.panels {
+		cols[i] = m.viewPanel(i, widths[i], bodyH)
+	}
+	parts := append([]string{top, lipgloss.JoinHorizontal(lipgloss.Top, cols...)}, graph...)
+	parts = append(parts, clip(m.viewCompare(scale), m.w), clip(m.viewStatus(), m.w), bottom)
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+}
+
+// viewGraph draws the recent rounds of every panel across the full width, one
+// line per panel and one cell per round. A round sits in the same column on
+// every line and all lines share one scale, so delay and loss on different
+// interfaces can be compared directly. It also returns the delay that is drawn
+// at full height.
+func (m *model) viewGraph(w int) ([]string, time.Duration) {
+	labelW, last := 0, 0
+	for _, p := range m.panels {
+		labelW = max(labelW, lipgloss.Width(m.panelName(p)))
+		if n := len(p.rows); n > 0 {
+			last = max(last, p.rows[n-1].seq)
+		}
+	}
+	labelW = min(labelW, w/3)
+	cells := max(w-labelW-1, 1)
+	// Fill from the left at first, then scroll with the newest round on the right.
+	first := max(last-cells+1, 1)
+
+	visible := make([][]row, len(m.panels))
 	var scale time.Duration
 	for i, p := range m.panels {
-		for _, r := range p.recent(max(widths[i]-2, 1)) {
+		at, _ := slices.BinarySearchFunc(p.rows, first, func(r row, seq int) int { return r.seq - seq })
+		rows := p.rows[at:]
+		visible[i] = rows
+		for _, r := range rows {
 			scale = max(scale, r.rtt)
 		}
 	}
-	cols := make([]string, n)
-	for i := range m.panels {
-		cols[i] = m.viewPanel(i, widths[i], bodyH, scale)
+
+	lines := make([]string, len(m.panels))
+	for i, p := range m.panels {
+		color := lipgloss.NewStyle().Foreground(panelColors[i])
+		var b strings.Builder
+		b.WriteString(color.Render(fmt.Sprintf("%-*s", labelW, clip(m.panelName(p), labelW))))
+		b.WriteByte(' ')
+		// Consecutive cells of one kind are styled together.
+		var run []rune
+		var runStyle lipgloss.Style
+		runState := rowPending
+		flush := func() {
+			if len(run) > 0 {
+				b.WriteString(runStyle.Render(string(run)))
+				run = run[:0]
+			}
+		}
+		col := first
+		for _, r := range visible[i] {
+			if r.seq > col || r.state != runState {
+				flush()
+			}
+			// Rounds this panel sat out stay empty.
+			b.WriteString(strings.Repeat(" ", r.seq-col))
+			col = r.seq + 1
+			switch runState = r.state; r.state {
+			case rowPending:
+				run, runStyle = append(run, '·'), styleDim
+			case rowOK:
+				level := 0
+				if scale > 0 {
+					level = min(int(r.rtt*time.Duration(len(graphBars))/scale), len(graphBars)-1)
+				}
+				run, runStyle = append(run, graphBars[level]), color
+			default:
+				run, runStyle = append(run, '×'), styleBad
+			}
+		}
+		flush()
+		lines[i] = clip(b.String(), w)
 	}
-	return lipgloss.JoinVertical(lipgloss.Left,
-		top,
-		lipgloss.JoinHorizontal(lipgloss.Top, cols...),
-		clip(m.viewCompare(scale), m.w),
-		clip(m.viewStatus(), m.w),
-		bottom)
+	return lines, scale
 }
 
 // wrap joins items with sep, breaking into lines no wider than w.
@@ -836,16 +883,16 @@ func ifaceLabel(ifc ping.Interface, v6 bool) string {
 	return fmt.Sprintf("%s (%s)", ifc.Name, addr)
 }
 
-func (m *model) viewPanel(i, w, h int, scale time.Duration) string {
+func (m *model) viewPanel(i, w, h int) string {
 	p := m.panels[i]
 	innerW, innerH := max(w-2, 1), max(h-2, 1)
 	focused := m.focus == numFields+i
 
 	title := "◂ " + ifaceLabel(p.ifc, m.v6(p)) + " ▸"
 	if focused {
-		title = styleFocus.Render(title)
+		title = styleFocus.Foreground(panelColors[i]).Render(title)
 	} else {
-		title = styleLabel.Render(title)
+		title = styleLabel.Foreground(panelColors[i]).Render(title)
 	}
 	if p.down {
 		title += styleBad.Render(" down")
@@ -869,7 +916,7 @@ func (m *model) viewPanel(i, w, h int, scale time.Duration) string {
 	if m.menu == i {
 		lines = append([]string{title}, m.viewMenu(innerH-1, m.v6(p))...)
 	} else {
-		lines = append([]string{title}, p.viewStats(m, innerW, scale)...)
+		lines = append([]string{title}, p.viewStats(m)...)
 		rows := p.rows
 		if logH := max(innerH-len(lines), 0); len(rows) > logH {
 			rows = rows[len(rows)-logH:]
@@ -900,7 +947,7 @@ func (m *model) viewPanel(i, w, h int, scale time.Duration) string {
 }
 
 // viewStats renders the fixed lines between a panel's title and its log.
-func (p *panel) viewStats(m *model, width int, scale time.Duration) []string {
+func (p *panel) viewStats(m *model) []string {
 	lost := func(n int, pct float64) string {
 		if n == 0 {
 			return "lost 0"
@@ -940,7 +987,7 @@ func (p *panel) viewStats(m *model, width int, scale time.Duration) []string {
 		gw = fmt.Sprintf("gateway %s  %s", p.ifc.Gateway, lost(g.lost, g.lossPct()))
 	}
 
-	return []string{counts, times, recent, gw, p.sparkline(width, scale)}
+	return []string{counts, times, recent, gw}
 }
 
 // viewMenu renders the open interface list, scrolled to keep the selection

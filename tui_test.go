@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -483,8 +484,12 @@ func TestViewFitsTerminal(t *testing.T) {
 			}
 			t.Log("\n" + view)
 			// Panel 1 is twice as slow, so only it may reach full height.
-			if strings.Contains(m.panels[0].sparkline(48, 96*time.Millisecond), "█") {
-				t.Error("faster panel drawn at full height on the shared scale")
+			graph, _ := m.viewGraph(size[0])
+			if strings.Contains(graph[0], "█") || !strings.Contains(graph[1], "█") {
+				t.Errorf("shared scale not applied:\n%s", strings.Join(graph, "\n"))
+			}
+			if !strings.Contains(view, graph[0]) || !strings.Contains(view, graph[1]) {
+				t.Error("view lacks the graph")
 			}
 			for _, want := range []string{"Δ vs eth0", "wlan0: +24.0 ms avg, +14.3% loss", "graph 0–96.0 ms", "last 60s  avg 49.0  p95 92.0 ms  lost 7 (14.3%)"} {
 				if !strings.Contains(view, want) {
@@ -492,5 +497,55 @@ func TestViewFitsTerminal(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestGraph(t *testing.T) {
+	m := testModel()
+	m.dst = net.IPv4(8, 8, 8, 8)
+	eth, wlan := m.panels[0], m.panels[1]
+	// wlan0 joins at round 3; round 4 is lost on it and round 6 still open.
+	for seq := 1; seq <= 6; seq++ {
+		eth.send(seq, time.Now())
+		eth.result(seq, 10*time.Millisecond, nil)
+		if seq < 3 {
+			continue
+		}
+		wlan.send(seq, time.Now())
+		switch seq {
+		case 4:
+			wlan.result(seq, 0, ping.ErrTimeout)
+		case 6:
+		default:
+			wlan.result(seq, 80*time.Millisecond, nil)
+		}
+	}
+	graph, scale := m.viewGraph(40)
+	if scale != 80*time.Millisecond {
+		t.Errorf("scale = %v, want 80ms", scale)
+	}
+	// Each round is in the same column on both lines.
+	if want := []string{"eth0  ▂▂▂▂▂▂", "wlan0   █×█·"}; !slices.Equal(graph, want) {
+		t.Errorf("graph = %q, want %q", graph, want)
+	}
+
+	// A narrow graph keeps the newest rounds, still aligned.
+	if graph, _ = m.viewGraph(9); !slices.Equal(graph, []string{"eth ▂▂▂▂▂", "wla  █×█·"}) {
+		t.Errorf("narrow graph = %q", graph)
+	}
+	for _, l := range graph {
+		if w := lipgloss.Width(l); w > 9 {
+			t.Errorf("line is %d cells wide: %q", w, l)
+		}
+	}
+
+	// A terminal too short for both keeps the panels and drops the graph.
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 12})
+	if view := m.View(); strings.Contains(view, "▂▂▂") || lipgloss.Height(view) > 12 {
+		t.Errorf("short view:\n%s", view)
+	}
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	if view := m.View(); !strings.Contains(view, "wlan0   █×█·") {
+		t.Errorf("view lacks the graph:\n%s", view)
 	}
 }

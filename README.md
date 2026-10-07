@@ -10,8 +10,8 @@ The Windows build compiles but has not been run yet; reports are welcome.
 ![Two panels pinging side by side](docs/main.png)
 
 Each panel pings through one interface. Here both use the same interface with
-different destinations; the line under the panels gives the difference from
-the leftmost panel.
+different destinations. The graph under the panels draws them on one scale,
+and the line below it gives the difference from the leftmost panel.
 
 ![Interface list open, next to an interface that loses every ping](docs/interfaces.png)
 
@@ -85,19 +85,36 @@ sent 50  recv 42  lost 7 (14.3%)                  all-time counts
 min 2.00  avg 49.0  max 96.0  jitter 2.29 ms      all-time round-trip times
 last 60s  avg 49.0  p95 92.0 ms  lost 7 (14.3%)   the last minute only
 gateway 192.168.1.1  avg 1.20  max 3.10 ms  lost 0
-▁▁▂×▂▃▃×▄▅▅▆×▇██                                  one cell per probe, × = lost
 seq=48    96.0 ms
 ```
 
 - The address after `→` in a panel's title is what that panel pings: the
   shared Destination unless the panel was given its own.
-- All sparklines share one scale, shown on the line under the panels.
-- The line under the panels compares every panel with the leftmost one.
+- The line under the graph compares every panel with the leftmost one.
 - The gateway line pings the interface's own IPv4 router at the same moments.
   A slow gateway points at the local link; a fast gateway with a slow
   destination points further upstream.
 - Interfaces are re-read every two seconds. A panel whose interface vanishes
   is marked `down`, counts its probes as lost and resumes when it returns.
+
+## Reading the graph
+
+```
+eth0  ▁▁▁▂▁▁▁▂▂▁▁▁▁▂▁▁▁▁▁·
+wlan0 ▃▃▄×▃▅▅×▄▅▅▆×▇██▆▅▅·
+Δ vs eth0 │ wlan0: +24.0 ms avg, +14.3% loss │ graph 0–96.0 ms
+```
+
+- One line per panel across the whole terminal, in the colour of that
+  panel's title. Each cell is one round of pings: the higher the bar, the
+  longer the reply took; `×` is a lost ping, `·` one still waiting.
+- A round is in the same column on every line, so loss or a spike that hits
+  all interfaces at once lines up vertically. A panel that sat a round out
+  (just added, or reset) leaves the cell empty.
+- All lines share one scale, from zero to the slowest reply on screen; the
+  line below names it.
+- The graph is left out when the terminal is too short to show it together
+  with the panels.
 
 ## Saved records
 
