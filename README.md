@@ -159,7 +159,7 @@ jq -s 'map(select(.type=="probe" and .status=="ok")) | group_by(.interface)
 ```
 make build      # ./multi-ping for this machine
 make test
-make dist       # dist/ binaries for Linux, macOS and Windows (amd64, arm64)
+make dist       # fresh dist/: binaries for Linux, macOS and Windows (amd64, arm64) and SHA256SUMS
 ```
 
 The screenshots above come from the real program:

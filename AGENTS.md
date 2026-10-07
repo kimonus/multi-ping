@@ -23,7 +23,7 @@ Read `README.md` first for what the user sees.
 ```
 make build     # ./multi-ping
 make test      # go vet + go test
-make dist      # cross-compile all six targets into dist/
+make dist      # empty dist/, cross-compile all six targets into it, write SHA256SUMS
 ```
 
 Before finishing any change, all of these must pass:
