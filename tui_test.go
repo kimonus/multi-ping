@@ -582,4 +582,16 @@ func TestGraphOutlier(t *testing.T) {
 	if view := m.View(); !strings.Contains(view, "graph 0–40.0 ms, ▲ above") {
 		t.Errorf("view lacks the legend:\n%s", view)
 	}
+
+	// A panel that is slow throughout fits the scale, however short its history.
+	m.addPanel()
+	usb := m.panels[2]
+	for seq := 30; seq <= 31; seq++ {
+		usb.send(seq, time.Now())
+		usb.result(seq, 300*time.Millisecond, nil)
+	}
+	graph, scale, over = m.viewGraph(100)
+	if scale != 600*time.Millisecond || !over || !strings.HasSuffix(graph[2], "▅▅") || !strings.HasSuffix(graph[1], "▁▲") {
+		t.Errorf("scale = %v over = %v\n%s", scale, over, strings.Join(graph, "\n"))
+	}
 }

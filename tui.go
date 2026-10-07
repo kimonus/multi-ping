@@ -173,8 +173,8 @@ var graphBars = []rune("▁▂▃▄▅▆▇█")
 // graphOver marks a reply too slow for the graph's scale.
 const graphOver = '▲'
 
-// graphHeadroom is how far above the 95th percentile of its replies the
-// graph's scale may reach.
+// graphHeadroom is how far above the 95th percentile of a panel's replies
+// the graph's scale may reach.
 const graphHeadroom = 2
 
 // panel is one interface's column.
@@ -738,29 +738,30 @@ func (m *model) viewGraph(w int) ([]string, time.Duration, bool) {
 	// Fill from the left at first, then scroll with the newest round on the right.
 	first := max(last-cells+1, 1)
 
+	// The slowest reply sets the scale, unless it is far above the rest: a
+	// few stray replies must not flatten every other bar. Each panel is
+	// judged by its own replies, so one that is slow throughout still fits.
 	visible := make([][]row, len(m.panels))
+	var scale, limit time.Duration
 	var rtts []time.Duration
 	for i, p := range m.panels {
 		at, _ := slices.BinarySearchFunc(p.rows, first, func(r row, seq int) int { return r.seq - seq })
 		rows := p.rows[at:]
 		visible[i] = rows
+		rtts = rtts[:0]
 		for _, r := range rows {
 			if r.state == rowOK {
 				rtts = append(rtts, r.rtt)
 			}
 		}
-	}
-	// The slowest reply sets the scale, unless it is far above the rest: a
-	// few stray replies must not flatten every other bar.
-	var scale time.Duration
-	over := false
-	if n := len(rtts); n > 0 {
-		slices.Sort(rtts)
-		scale = rtts[n-1]
-		if limit := rtts[(n*95+99)/100-1] * graphHeadroom; scale > limit {
-			scale, over = limit, true
+		if n := len(rtts); n > 0 {
+			slices.Sort(rtts)
+			scale = max(scale, rtts[n-1])
+			limit = max(limit, rtts[(n*95+99)/100-1]*graphHeadroom)
 		}
 	}
+	over := scale > limit
+	scale = min(scale, limit)
 
 	lines := make([]string, len(m.panels))
 	for i, p := range m.panels {
