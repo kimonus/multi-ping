@@ -484,12 +484,15 @@ func TestViewFitsTerminal(t *testing.T) {
 			}
 			t.Log("\n" + view)
 			// Panel 1 is twice as slow, so only it may reach full height.
-			graph, _, _ := m.viewGraph(size[0])
+			graph, _, _ := m.viewGraph(size[0], 1)
 			if strings.Contains(graph[0], "█") || !strings.Contains(graph[1], "█") {
 				t.Errorf("shared scale not applied:\n%s", strings.Join(graph, "\n"))
 			}
-			if !strings.Contains(view, graph[0]) || !strings.Contains(view, graph[1]) {
-				t.Error("view lacks the graph")
+			graph, _, _ = m.viewGraph(size[0], maxGraphH)
+			for _, l := range graph {
+				if !strings.Contains(view, strings.TrimRight(l, " ")) {
+					t.Errorf("view lacks the graph line %q", l)
+				}
 			}
 			for _, want := range []string{"Δ vs eth0", "wlan0: +24.0 ms avg, +14.3% loss", "graph 0–96.0 ms", "last 60s  avg 49.0  p95 92.0 ms  lost 7 (14.3%)"} {
 				if !strings.Contains(view, want) {
@@ -520,7 +523,7 @@ func TestGraph(t *testing.T) {
 			wlan.result(seq, 80*time.Millisecond, nil)
 		}
 	}
-	graph, scale, over := m.viewGraph(40)
+	graph, scale, over := m.viewGraph(40, 1)
 	if scale != 80*time.Millisecond || over {
 		t.Errorf("scale = %v over = %v, want 80ms false", scale, over)
 	}
@@ -530,7 +533,7 @@ func TestGraph(t *testing.T) {
 	}
 
 	// A narrow graph keeps the newest rounds, still aligned.
-	if graph, _, _ = m.viewGraph(9); !slices.Equal(graph, []string{"eth ▂▂▂▂▂", "wla  █×█·"}) {
+	if graph, _, _ = m.viewGraph(9, 1); !slices.Equal(graph, []string{"eth ▂▂▂▂▂", "wla  █×█·"}) {
 		t.Errorf("narrow graph = %q", graph)
 	}
 	for _, l := range graph {
@@ -564,7 +567,7 @@ func TestGraphOutlier(t *testing.T) {
 	// Twice the usual delay still fits the scale.
 	eth.send(31, time.Now())
 	eth.result(31, 40*time.Millisecond, nil)
-	graph, scale, over := m.viewGraph(100)
+	graph, scale, over := m.viewGraph(100, 1)
 	if scale != 40*time.Millisecond || over || !strings.HasSuffix(graph[0], "▃█") {
 		t.Errorf("scale = %v over = %v\n%s", scale, over, strings.Join(graph, "\n"))
 	}
@@ -572,7 +575,7 @@ func TestGraphOutlier(t *testing.T) {
 	// One stray reply is marked instead of flattening the rest.
 	wlan.send(31, time.Now())
 	wlan.result(31, 900*time.Millisecond, nil)
-	graph, scale, over = m.viewGraph(100)
+	graph, scale, over = m.viewGraph(100, 1)
 	if scale != 40*time.Millisecond || !over {
 		t.Errorf("scale = %v over = %v, want 40ms true", scale, over)
 	}
@@ -590,8 +593,72 @@ func TestGraphOutlier(t *testing.T) {
 		usb.send(seq, time.Now())
 		usb.result(seq, 300*time.Millisecond, nil)
 	}
-	graph, scale, over = m.viewGraph(100)
+	graph, scale, over = m.viewGraph(100, 1)
 	if scale != 600*time.Millisecond || !over || !strings.HasSuffix(graph[2], "▅▅") || !strings.HasSuffix(graph[1], "▁▲") {
 		t.Errorf("scale = %v over = %v\n%s", scale, over, strings.Join(graph, "\n"))
+	}
+}
+
+func TestGraphHeight(t *testing.T) {
+	m := testModel()
+	m.dst = net.IPv4(8, 8, 8, 8)
+	eth, wlan := m.panels[0], m.panels[1]
+	// eth0 climbs from an eighth of the scale to all of it; wlan0 stays at
+	// half, loses one round and has one still open.
+	for seq, ms := range []int{10, 20, 30, 40, 50, 60, 70, 80} {
+		eth.send(seq+1, time.Now())
+		eth.result(seq+1, time.Duration(ms)*time.Millisecond, nil)
+		wlan.send(seq+1, time.Now())
+		switch seq {
+		case 2:
+			wlan.result(seq+1, 0, ping.ErrTimeout)
+		case 7:
+		default:
+			wlan.result(seq+1, 40*time.Millisecond, nil)
+		}
+	}
+	trimmed := func(w, h int) []string {
+		graph, _, _ := m.viewGraph(w, h)
+		for i := range graph {
+			graph[i] = strings.TrimRight(graph[i], " ")
+		}
+		return graph
+	}
+	want := []string{
+		"           ▃▆█",
+		"        ▂▅████",
+		"eth0  ▄▇██████",
+		"",
+		"      ▅▅ ▅▅▅▅",
+		"wlan0 ██×████·",
+	}
+	if graph := trimmed(40, 3); !slices.Equal(graph, want) {
+		t.Errorf("graph:\n%s\nwant:\n%s", strings.Join(graph, "\n"), strings.Join(want, "\n"))
+	}
+
+	// A reply off the scale fills its column and is marked at the top.
+	for seq := 9; seq <= 40; seq++ {
+		wlan.send(seq, time.Now())
+		wlan.result(seq, 40*time.Millisecond, nil)
+	}
+	wlan.send(41, time.Now())
+	wlan.result(41, 900*time.Millisecond, nil)
+	graph := trimmed(60, 3)
+	for i, end := range []string{"▲", "█", "▇█"} {
+		if !strings.HasSuffix(graph[3+i], end) {
+			t.Errorf("line %d of wlan0 does not end in %q:\n%s", i, end, strings.Join(graph, "\n"))
+		}
+	}
+
+	// The graph shrinks as the terminal gets shorter, then gives way.
+	for h, want := range map[int]int{30: 6, 19: 4, 16: 2, 12: 0} {
+		m.Update(tea.WindowSizeMsg{Width: 100, Height: h})
+		view := m.View()
+		lines := strings.Split(view, "\n")
+		box := slices.IndexFunc(lines, func(l string) bool { return strings.HasPrefix(l, "╰") })
+		delta := slices.IndexFunc(lines, func(l string) bool { return strings.HasPrefix(l, "Δ") })
+		if got := delta - box - 1; got != want || len(lines) > h {
+			t.Errorf("height %d: %d graph lines, want %d; view is %d lines tall\n%s", h, got, want, len(lines), view)
+		}
 	}
 }

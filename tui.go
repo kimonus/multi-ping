@@ -173,6 +173,13 @@ var graphBars = []rune("▁▂▃▄▅▆▇█")
 // graphOver marks a reply too slow for the graph's scale.
 const graphOver = '▲'
 
+// maxGraphH is how many lines a panel's graph takes when there is room, and
+// graphLogH how many lines of the panels' logs a taller graph must leave.
+const (
+	maxGraphH = 3
+	graphLogH = 3
+)
+
 // graphHeadroom is how far above the 95th percentile of a panel's replies
 // the graph's scale may reach.
 const graphHeadroom = 2
@@ -705,10 +712,19 @@ func (m *model) View() string {
 	}
 	widths[n-1] = m.w - (m.w/n)*(n-1)
 
-	graph, scale, over := m.viewGraph(m.w)
-	// The graph gives way to the panels when the terminal is too short for both.
-	if bodyH-len(graph) < minBodyH {
-		graph, scale, over = nil, 0, false
+	// The graph is as tall as leaves the panels a few lines of their logs,
+	// and gives way to them when the terminal is too short for both.
+	var graph []string
+	var scale time.Duration
+	var over bool
+	for gh := maxGraphH; gh > 0 && graph == nil; gh-- {
+		room := minBodyH + graphLogH
+		if gh == 1 {
+			room = minBodyH
+		}
+		if bodyH-n*gh >= room {
+			graph, scale, over = m.viewGraph(m.w, gh)
+		}
 	}
 	bodyH -= len(graph)
 	cols := make([]string, n)
@@ -720,12 +736,12 @@ func (m *model) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
-// viewGraph draws the recent rounds of every panel across the full width, one
-// line per panel and one cell per round. A round sits in the same column on
-// every line and all lines share one scale, so delay and loss on different
+// viewGraph draws the recent rounds of every panel across the full width, h
+// lines per panel and one column per round. A round sits in the same column
+// for every panel and all share one scale, so delay and loss on different
 // interfaces can be compared directly. It also returns the delay that is drawn
 // at full height, and whether any reply was slower than that.
-func (m *model) viewGraph(w int) ([]string, time.Duration, bool) {
+func (m *model) viewGraph(w, h int) ([]string, time.Duration, bool) {
 	labelW, last := 0, 0
 	for _, p := range m.panels {
 		labelW = max(labelW, lipgloss.Width(m.panelName(p)))
@@ -763,48 +779,72 @@ func (m *model) viewGraph(w int) ([]string, time.Duration, bool) {
 	over := scale > limit
 	scale = min(scale, limit)
 
-	lines := make([]string, len(m.panels))
+	// A bar's height is counted in eighths of a line.
+	full := len(graphBars)
+	steps := time.Duration(h * full)
+	var lines []string
 	for i, p := range m.panels {
 		color := lipgloss.NewStyle().Foreground(panelColors[i])
-		var b strings.Builder
-		b.WriteString(color.Render(fmt.Sprintf("%-*s", labelW, clip(m.panelName(p), labelW))))
-		b.WriteByte(' ')
-		// Consecutive cells of one kind are styled together.
-		var run []rune
-		var runStyle lipgloss.Style
-		runState := rowPending
-		flush := func() {
-			if len(run) > 0 {
-				b.WriteString(runStyle.Render(string(run)))
-				run = run[:0]
+		label := color.Render(fmt.Sprintf("%-*s", labelW, clip(m.panelName(p), labelW)))
+		// Bars stand on the bottom line, next to the label; line counts up from it.
+		for line := h - 1; line >= 0; line-- {
+			var b strings.Builder
+			if line == 0 {
+				b.WriteString(label)
+			} else {
+				b.WriteString(strings.Repeat(" ", labelW))
 			}
-		}
-		col := first
-		for _, r := range visible[i] {
-			if r.seq > col || r.state != runState {
-				flush()
-			}
-			// Rounds this panel sat out stay empty.
-			b.WriteString(strings.Repeat(" ", r.seq-col))
-			col = r.seq + 1
-			switch runState = r.state; r.state {
-			case rowPending:
-				run, runStyle = append(run, '·'), styleDim
-			case rowOK:
-				bar := graphOver
-				if r.rtt <= scale {
-					bar = graphBars[0]
-					if scale > 0 {
-						bar = graphBars[min(int(r.rtt*time.Duration(len(graphBars))/scale), len(graphBars)-1)]
-					}
+			b.WriteByte(' ')
+			// Consecutive cells of one style are rendered together.
+			var run []rune
+			var runStyle *lipgloss.Style
+			flush := func() {
+				if len(run) > 0 {
+					b.WriteString(runStyle.Render(string(run)))
+					run = run[:0]
 				}
-				run, runStyle = append(run, bar), color
-			default:
-				run, runStyle = append(run, '×'), styleBad
 			}
+			put := func(r rune, style *lipgloss.Style) {
+				if style != runStyle {
+					flush()
+				}
+				run, runStyle = append(run, r), style
+			}
+			col := first
+			for _, r := range visible[i] {
+				cell, style := ' ', &color
+				switch {
+				case r.state == rowOK && r.rtt > scale:
+					if cell = graphBars[full-1]; line == h-1 {
+						cell = graphOver
+					}
+				case r.state == rowOK:
+					height := 1
+					if scale > 0 {
+						height += min(int(r.rtt*steps/scale), int(steps)-1)
+					}
+					if part := height - line*full; part > 0 {
+						cell = graphBars[min(part, full)-1]
+					}
+				case line > 0:
+				case r.state == rowPending:
+					cell, style = '·', &styleDim
+				default:
+					cell, style = '×', &styleBad
+				}
+				if cell == ' ' {
+					continue // drawn as a gap, like a round this panel sat out
+				}
+				if r.seq > col {
+					flush()
+					b.WriteString(strings.Repeat(" ", r.seq-col))
+				}
+				col = r.seq + 1
+				put(cell, style)
+			}
+			flush()
+			lines = append(lines, clip(b.String(), w))
 		}
-		flush()
-		lines[i] = clip(b.String(), w)
 	}
 	return lines, scale, over
 }

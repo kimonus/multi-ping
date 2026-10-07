@@ -100,25 +100,31 @@ seq=48    96.0 ms
 ## Reading the graph
 
 ```
-eth0  ▁▁▁▂▁▁▁▂▂▁▁▁▁▂▁▁▁▁▁·
-wlan0 ▃▃▄×▃▅▅×▄▅▅▆×▇██▆▅▅·
+
+eth0  ▂▂▂▃▂▂▂▃▃▂▂▂▂▃▂▂▂▂▂·
+             ▂     ▃▅▅
+        ▂  ▄▄ ▃▅▅▆ ███▅▃▃
+wlan0 ▆▆█×███×████×██████·
 Δ vs eth0 │ wlan0: +24.0 ms avg, +14.3% loss │ graph 0–96.0 ms
 ```
 
-- One line per panel across the whole terminal, in the colour of that
-  panel's title. Each cell is one round of pings: the higher the bar, the
-  longer the reply took; `×` is a lost ping, `·` one still waiting.
-- A round is in the same column on every line, so loss or a spike that hits
+- One graph per panel across the whole terminal, in the colour of that
+  panel's title, with its name beside the bottom line. Each column is one
+  round of pings: the higher the bar, the longer the reply took; `×` is a
+  lost ping, `·` one still waiting.
+- A round is in the same column in every graph, so loss or a spike that hits
   all interfaces at once lines up vertically. A panel that sat a round out
-  (just added, or reset) leaves the cell empty.
-- All lines share one scale, from zero to the slowest reply on screen; the
+  (just added, or reset) leaves the column empty.
+- A graph is three lines tall. On a short terminal it shrinks to two lines or
+  one, to leave room for the panels.
+- All graphs share one scale, from zero to the slowest reply on screen; the
   line below names it.
 - A few stray replies do not flatten the rest: the scale stops at twice the
   95th percentile of a panel's replies on screen, taking the slowest panel,
   and a reply slower than that is drawn as `▲`. The line below then reads
   `graph 0–40.0 ms, ▲ above`.
-- The graph is left out when the terminal is too short to show it together
-  with the panels.
+- The graphs are left out when the terminal is too short to show even one
+  line each together with the panels.
 
 ## Saved records
 
@@ -160,7 +166,7 @@ The screenshots above come from the real program:
 
 ```
 pip install pyte pillow
-docs/screenshot.py docs/main.png 100x24 34 -- -n 500 -i eth0=1.1.1.1,eth0=8.8.8.8
+docs/screenshot.py docs/main.png 100x26 34 -- -n 500 -i eth0=1.1.1.1,eth0=8.8.8.8
 docs/screenshot.py docs/interfaces.png 100x16 9 '\t ' -- -n 500 -t 400 -i docker0=8.8.8.8,eth0=8.8.8.8
 ```
 
