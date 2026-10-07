@@ -63,6 +63,33 @@ GOOS=darwin go vet ./...
   layout changes visibly.
 - **Dependencies.** Do not add modules without a clear need.
 
+## Releases
+
+Versions follow [Semantic Versioning](https://semver.org). What users depend
+on, and so what the number is a promise about: the flags, the keys, the saved
+record format (JSON Lines and CSV), the plain-mode output and the names of
+the download files.
+
+| Bump | When | Examples |
+|---|---|---|
+| Major | something users depend on changes or goes away | a flag renamed or removed, a key doing something else, a record field renamed or removed (also bumps `format`), plain-mode lines changed, a platform dropped |
+| Minor | something new; all that worked before still works the same | a new flag, key or record field, a new or visibly reworked part of the screen, a new platform |
+| Patch | no new features, existing ones made right | a wrong figure, a crash, a drawing error, a fix to one OS's backend |
+
+- A release takes the highest bump among its changes.
+- While the version is 0.x, a breaking change may go into a minor bump; say so
+  at the top of the release notes.
+- Changes that do not alter the binary (build scripts, README, tests) are not
+  released on their own; they wait for the next release.
+- Collect related changes into one release instead of one release per fix.
+- Do not publish until the owner has run the build and confirmed it. Give
+  them `make dist` binaries of the branch to try.
+- To publish: merge to `main`, tag `vX.Y.Z` and push the tag, then run
+  `make dist` (the tag must exist first, it is what `-version` prints) and
+  create the GitHub release from that tag with everything in `dist/`. In the
+  notes, list what changed, the download table, and which systems the build
+  was actually run on.
+
 ## Commits and branches
 
 - Do not mention any AI agent, assistant or coding tool in commit messages,
