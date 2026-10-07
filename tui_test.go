@@ -662,3 +662,32 @@ func TestGraphHeight(t *testing.T) {
 		}
 	}
 }
+
+func TestPanelRule(t *testing.T) {
+	m := testModel()
+	m.dst, m.running = net.IPv4(8, 8, 8, 8), true
+	for seq := 1; seq <= 5; seq++ {
+		m.panels[0].send(seq, time.Now())
+		m.panels[0].result(seq, 10*time.Millisecond, nil)
+	}
+	rule := "├" + strings.Repeat("─", 38) + "┤"
+
+	// The rule sits between the statistics and the log, joined to the frame.
+	lines := strings.Split(m.viewPanel(0, 40, 12), "\n")
+	if len(lines) != 12 || lines[6] != rule {
+		t.Fatalf("panel:\n%s", strings.Join(lines, "\n"))
+	}
+	if !strings.Contains(lines[5], "gateway") || !strings.Contains(lines[7], "seq=2") || !strings.Contains(lines[10], "seq=5") {
+		t.Errorf("rule not between statistics and log:\n%s", strings.Join(lines, "\n"))
+	}
+
+	// No rule without room for a log line under it, nor over the interface list.
+	if box := m.viewPanel(0, 40, 8); strings.Contains(box, "├") || lipgloss.Height(box) != 8 {
+		t.Errorf("short panel:\n%s", box)
+	}
+	m.focus = numFields
+	key(m, " ")
+	if box := m.viewPanel(0, 40, 12); strings.Contains(box, "├") {
+		t.Errorf("rule over the open list:\n%s", box)
+	}
+}

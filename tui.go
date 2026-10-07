@@ -981,10 +981,17 @@ func (m *model) viewPanel(i, w, h int) string {
 	}
 
 	var lines []string
+	// ruleAt is the line that parts the fixed statistics from the scrolling
+	// log, or -1 when there is no log to part them from.
+	ruleAt := -1
 	if m.menu == i {
 		lines = append([]string{title}, m.viewMenu(innerH-1, m.v6(p))...)
 	} else {
 		lines = append([]string{title}, p.viewStats(m)...)
+		if innerH-len(lines) >= 2 {
+			ruleAt = len(lines)
+			lines = append(lines, "")
+		}
 		rows := p.rows
 		if logH := max(innerH-len(lines), 0); len(rows) > logH {
 			rows = rows[len(rows)-logH:]
@@ -1011,7 +1018,15 @@ func (m *model) viewPanel(i, w, h int) string {
 	if focused {
 		border = borderFocus
 	}
-	return border.Width(innerW).Height(innerH).Render(strings.Join(lines, "\n"))
+	box := border.Width(innerW).Height(innerH).Render(strings.Join(lines, "\n"))
+	if ruleAt < 0 {
+		return box
+	}
+	// Draw the rule as part of the frame, joined to both sides.
+	boxLines := strings.Split(box, "\n")
+	boxLines[ruleAt+1] = lipgloss.NewStyle().Foreground(border.GetBorderTopForeground()).
+		Render("├" + strings.Repeat("─", innerW) + "┤")
+	return strings.Join(boxLines, "\n")
 }
 
 // viewStats renders the fixed lines between a panel's title and its log.

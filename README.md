@@ -85,9 +85,12 @@ sent 50  recv 42  lost 7 (14.3%)                  all-time counts
 min 2.00  avg 49.0  max 96.0  jitter 2.29 ms      all-time round-trip times
 last 60s  avg 49.0  p95 92.0 ms  lost 7 (14.3%)   the last minute only
 gateway 192.168.1.1  avg 1.20  max 3.10 ms  lost 0
+──────────────────────────────────────────────    above: totals; below: the log
 seq=48    96.0 ms
 ```
 
+- The lines above the rule stay in place; the log under it scrolls, newest
+  probe at the bottom.
 - The address after `→` in a panel's title is what that panel pings: the
   shared Destination unless the panel was given its own.
 - The line under the graph compares every panel with the leftmost one.
