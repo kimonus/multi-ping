@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +16,19 @@ import (
 
 	"github.com/kimonus/multi-ping/internal/ping"
 )
+
+// version is set by the Makefile; other builds take it from the module.
+var version string
+
+func buildVersion() string {
+	if version != "" {
+		return version
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" {
+		return bi.Main.Version
+	}
+	return "unknown"
+}
 
 // options are the settings shared by the terminal UI and plain mode.
 type options struct {
@@ -36,6 +50,7 @@ func main() {
 		panels  = flag.Int("p", 2, "number of panels when -i is not given")
 		noGW    = flag.Bool("no-gw", false, "do not ping each interface's gateway")
 		logPath = flag.String("o", "", "append every probe to this CSV file")
+		showVer = flag.Bool("version", false, "print the version and exit")
 	)
 	flag.IntVar(&o.timeoutMS, "t", 1000, "reply timeout in ms")
 	flag.IntVar(&o.size, "s", 56, "payload size in bytes")
@@ -47,6 +62,10 @@ func main() {
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+	if *showVer {
+		fmt.Println("multi-ping", buildVersion())
+		return
+	}
 	o.dest = flag.Arg(0)
 	if maxRows < 0 {
 		fatal(fmt.Errorf("-keep must not be negative"))

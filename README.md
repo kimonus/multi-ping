@@ -57,7 +57,7 @@ multi-ping -plain -c 10 8.8.8.8         # plain lines, no terminal UI
 
 Other flags: `-t` timeout (ms), `-s` payload size (bytes), `-n` interval (ms),
 `-6` prefer IPv6 for host names, `-no-gw` skip the gateway pings, `-keep`
-probes kept in memory for dumps.
+probes kept in memory for dumps, `-version` print the version and exit.
 
 ## Keys
 

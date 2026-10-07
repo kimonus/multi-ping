@@ -1,7 +1,11 @@
 TARGETS = linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 
+# What -version prints: the latest tag, plus the commit when built past it.
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null)
+LDFLAGS = -X main.version=$(VERSION)
+
 build:
-	go build -o multi-ping .
+	go build -ldflags "$(LDFLAGS)" -o multi-ping .
 
 test:
 	go vet ./... && go test ./...
@@ -11,7 +15,7 @@ dist:
 	@for t in $(TARGETS); do \
 		os=$${t%/*}; arch=$${t#*/}; ext=; [ $$os = windows ] && ext=.exe; \
 		echo "$$os/$$arch"; \
-		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags "-s -w" \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags "-s -w $(LDFLAGS)" \
 			-o dist/multi-ping-$$os-$$arch$$ext . || exit 1; \
 	done
 
