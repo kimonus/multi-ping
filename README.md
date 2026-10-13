@@ -68,14 +68,24 @@ probes kept in memory for dumps, `-version` print the version and exit.
 | Space or ↓ | open the interface list (↑/↓, Enter to pick, Esc to cancel) |
 | d | give the focused panel its own destination (empty = back to the shared one) |
 | + / - | add a panel / remove the focused panel (1 to 6 panels) |
-| Enter | start / stop |
-| r | reset statistics |
+| Enter | stop / start again |
+| r | reset the counters, logs and graph of every panel |
 | w | save a dump of the current panels to `multi-ping-<date>-<time>.jsonl` |
 | v | switch between IPv4 and IPv6 for host names that have both |
 | q, Ctrl+C | quit |
 
 Letter and `+`/`-` keys type text while the Destination field is focused; Tab
 out of it first.
+
+Stopping keeps everything on screen, and starting again carries on from
+there: counters, logs and the graph continue. They start over only where they
+would otherwise mix two things:
+
+- a new shared Destination clears the panels that use it;
+- switching between IPv4 and IPv6 (`v`) clears every panel;
+- a new interface or own destination clears that panel.
+
+`r` clears every panel at any time, running or stopped.
 
 ## Reading a panel
 

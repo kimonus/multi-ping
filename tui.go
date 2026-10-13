@@ -255,6 +255,10 @@ type model struct {
 	gen     int // bumped on every start so stale ticks are dropped
 	seq     int
 	dst     net.IP // the shared destination, resolved
+	// What the panels' counters were gathered for: the shared destination
+	// as typed and the address family. A start that changes neither resumes.
+	ranDest string
+	ranV6   bool
 	status  string
 	notice  string // outcome of the last dump, shown until the next key
 	auto    bool
@@ -469,10 +473,17 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = msg.err.Error()
 			break
 		}
-		m.dst, m.status, m.running, m.seq = msg.ip, "", true, 0
+		m.dst, m.status, m.running = msg.ip, "", true
+		// Counters carry on from the last run, except where they would mix
+		// replies from two destinations or two address families.
+		shared := strings.TrimSpace(m.fields[fDest])
 		for _, p := range m.panels {
-			p.reset()
+			if m.prefer6 != m.ranV6 || (p.dest == "" && shared != m.ranDest) {
+				p.reset()
+			}
 		}
+		m.ranDest, m.ranV6 = shared, m.prefer6
+		m.restartSeq()
 		if m.focus == fDest {
 			m.focus = numFields
 		}
@@ -497,6 +508,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// restartSeq starts the numbering over once no panel holds probes, so the
+// graph fills from the left again. Rows must stay in rising order otherwise.
+func (m *model) restartSeq() {
+	if !slices.ContainsFunc(m.panels, func(p *panel) bool { return len(p.rows)+len(p.gw.rows) > 0 }) {
+		m.seq = 0
+	}
 }
 
 func (m *model) start() tea.Cmd {
@@ -676,6 +695,7 @@ func (m *model) hotkey(key string) tea.Cmd {
 		for _, p := range m.panels {
 			p.reset()
 		}
+		m.restartSeq()
 	case "v":
 		// Only matters for host names that have both families.
 		m.prefer6 = !m.prefer6
@@ -696,7 +716,7 @@ func (m *model) View() string {
 	}
 	top := m.viewTop()
 	help := []string{"Tab next", "←/→ or Space interface", "d panel destination", "+/- panels",
-		"Enter start/stop", "r reset", "w save dump", "v IPv4/6", "q quit"}
+		"Enter start/stop", "r reset counters", "w save dump", "v IPv4/6", "q quit"}
 	switch {
 	case m.menu >= 0:
 		help = []string{"↑/↓ choose", "Enter select", "Esc cancel"}
@@ -902,6 +922,9 @@ func (m *model) viewStatus() string {
 			fmt.Sprintf("  seq %d  %d bytes  every %s", m.seq, m.size, m.interval) + extra
 	case m.status != "":
 		return styleBad.Render("■ "+m.status) + extra
+	}
+	if slices.ContainsFunc(m.panels, func(p *panel) bool { return p.sent > 0 }) {
+		return styleDim.Render("■ stopped — Enter to resume, r to reset") + extra
 	}
 	return styleDim.Render("■ stopped — Enter to start") + extra
 }

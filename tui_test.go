@@ -691,3 +691,69 @@ func TestPanelRule(t *testing.T) {
 		t.Errorf("rule over the open list:\n%s", box)
 	}
 }
+
+func TestResume(t *testing.T) {
+	m := testModel()
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	eth, wlan := m.panels[0], m.panels[1]
+	wlan.dest, wlan.own = "10.9.9.9", net.IPv4(10, 9, 9, 9)
+	// answer completes the round in flight on both panels and returns its number.
+	answer := func() int {
+		for _, p := range m.panels {
+			m.Update(resultMsg{p, p.epoch, record{seq: m.seq, rtt: 10 * time.Millisecond}})
+		}
+		return m.seq
+	}
+	// start stands in for Enter plus the lookup, which needs no network here.
+	// Like the real one, it sends the first round.
+	start := func(dest string) int {
+		m.fields[fDest] = dest
+		m.start()
+		m.Update(resolvedMsg{gen: m.gen, start: true, ip: net.ParseIP(dest)})
+		return answer()
+	}
+	round := func() int {
+		m.round()
+		return answer()
+	}
+
+	start("8.8.8.8")
+	round()
+	key(m, "enter")
+	if m.running || eth.recv != 2 || !strings.Contains(m.View(), "Enter to resume") {
+		t.Fatalf("after stop: running=%v recv=%d", m.running, eth.recv)
+	}
+
+	// The same destination again: counters and numbering carry on.
+	if seq := start("8.8.8.8"); !m.running || seq != 3 || eth.recv != 3 || wlan.recv != 3 || len(eth.rows) != 3 {
+		t.Errorf("after resume: seq=%d recv=%d/%d", seq, eth.recv, wlan.recv)
+	}
+
+	// A new shared destination clears the panels using it, not the one with its own.
+	key(m, "enter")
+	if seq := start("1.1.1.1"); seq != 4 || eth.recv != 1 || wlan.recv != 4 {
+		t.Errorf("after a new destination: seq=%d recv=%d/%d", seq, eth.recv, wlan.recv)
+	}
+
+	// The other address family clears every panel, and numbering starts over.
+	key(m, "enter")
+	m.prefer6 = true
+	if seq := start("1.1.1.1"); seq != 1 || eth.recv != 1 || wlan.recv != 1 {
+		t.Errorf("after a family change: seq=%d recv=%d/%d", seq, eth.recv, wlan.recv)
+	}
+
+	// r while running clears the counters and the graph starts from the left.
+	round()
+	m.focus = numFields
+	key(m, "r")
+	if seq := round(); !m.running || seq != 1 || eth.sent != 1 || eth.recv != 1 {
+		t.Errorf("after r: seq=%d sent=%d recv=%d", seq, eth.sent, eth.recv)
+	}
+	if graph, _, _ := m.viewGraph(60, 1); !strings.HasPrefix(graph[0], "eth0"+strings.Repeat(" ", 11)+"█") {
+		t.Errorf("graph after r: %q", graph)
+	}
+	key(m, "enter", "r")
+	if !strings.Contains(m.View(), "Enter to start") {
+		t.Error("stopped and reset, but still offers to resume")
+	}
+}
